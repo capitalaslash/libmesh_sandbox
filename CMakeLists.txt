@@ -16,6 +16,8 @@ include_directories(${LIBMESH_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${LIBMESH_LIBRARIES})
 link_libraries(${LIBS})
 
+add_subdirectory(test1d)
+
 add_subdirectory(hermite1d)
 
 add_subdirectory(elem_add)
