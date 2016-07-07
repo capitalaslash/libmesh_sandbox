@@ -28,3 +28,5 @@ add_subdirectory(elem_add)
 
 add_subdirectory(self_lumping1d)
 
+add_subdirectory(stokes2d)
+
