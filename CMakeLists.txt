@@ -4,7 +4,8 @@ project(libmeshSandbox CXX)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -Wall -Wpedantic -std=c++11")
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -Wall -Wpedantic")
 
 find_package(MPI REQUIRED)
 set(CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER})
@@ -13,6 +14,7 @@ find_package(LIBMESH REQUIRED)
 add_definitions(${LIBMESH_DEFINITIONS})
 include_directories(${LIBMESH_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${LIBMESH_LIBRARIES})
+link_libraries(${LIBS})
 
 add_subdirectory(hermite1d)
 
