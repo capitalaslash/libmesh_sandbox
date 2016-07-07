@@ -29,9 +29,9 @@ using namespace libMesh;
 
 Real force(Point const& p)
 {
-    // return 0.25*M_PI*M_PI * std::sin(0.5*M_PI * p(0));
-    return 2.0;
-    // return std::sin(p(0));
+//    return 0.0;
+    return 0.25*M_PI*M_PI*std::sin(0.5*M_PI*p(0));
+//    return 2.0;
 }
 
 void assemble_poisson(EquationSystems& es, const std::string& system_name)
@@ -130,6 +130,7 @@ void assemble_poisson(EquationSystems& es, const std::string& system_name)
 //            }
 
         dof_map.constrain_element_matrix_and_vector (Ke, Fe, dof_indices);
+      //  dof_map.heterogenously_constrain_element_matrix_and_vector (Ke, Fe, dof_indices);
         system.matrix->add_matrix (Ke, dof_indices);
         system.rhs->add_vector    (Fe, dof_indices);
     }
@@ -142,7 +143,7 @@ int main(int argc, char* argv[])
     Mesh mesh(init.comm());
 
     // MeshTools::Generation::build_square(mesh, 4, 4, 0., 1., 0., 1., QUAD4);
-    MeshTools::Generation::build_line(mesh, 2, 0., 1., EDGE2);
+    MeshTools::Generation::build_line(mesh, 3, 0., 2., EDGE2);
 
     mesh.print_info();
 
@@ -158,10 +159,10 @@ int main(int argc, char* argv[])
     system.attach_assemble_function(assemble_poisson);
 
     ZeroFunction<Real> zero;
+//    ConstFunction<Real> one(1.0);
 
-    DirichletBoundary dirichlet_bc({0}, {0}, &zero);
-
-    system.get_dof_map().add_dirichlet_boundary(dirichlet_bc);
+    system.get_dof_map().add_dirichlet_boundary(DirichletBoundary({0}, {0}, &zero));
+    system.get_dof_map().add_dirichlet_boundary(DirichletBoundary({1}, {0}, &zero));
 
     es.init();
 
@@ -174,12 +175,12 @@ int main(int argc, char* argv[])
     system.rhs->print();
     system.solution->print();
 
-    ErrorVector error;
-    UniquePtr<ErrorEstimator> error_estimator(new KellyErrorEstimator);
-    error_estimator->estimate_error(system, error);
-    Real global_error = error.l2_norm();
+//    ErrorVector error;
+//    UniquePtr<ErrorEstimator> error_estimator(new KellyErrorEstimator);
+//    error_estimator->estimate_error(system, error);
+//    Real global_error = error.l2_norm();
 
-    out << "l2 error = " << global_error << std::endl;
+//    out << "l2 error = " << global_error << std::endl;
 
     std::ostringstream file_name;
 

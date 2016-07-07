@@ -19,7 +19,10 @@
 
 using namespace libMesh;
 
-Real exact_solution(Real const x, Real const y, Real const z);
+Real exact_solution(Point const p)
+{
+    return std::sin(0.5*M_PI*p(0));
+}
 
 class Diff: public FEMSystem
 {
@@ -36,10 +39,10 @@ public:
         this->time_evolving(_u_var);
 
         ZeroFunction<Number> zero;
-//        ConstFunction<Number> one(1.0);
+        ConstFunction<Number> one(1.0);
 
         this->get_dof_map().add_dirichlet_boundary(DirichletBoundary({0}, {0}, &zero));
-//        this->get_dof_map().add_dirichlet_boundary(DirichletBoundary({1}, {0}, &zero));
+//        this->get_dof_map().add_dirichlet_boundary(DirichletBoundary({1}, {0}, &one));
 
         FEMSystem::init_data();
     }
@@ -82,13 +85,13 @@ public:
 
         for(uint qp = 0; qp < n_qp; qp++)
         {
-            // Gradient grad_u = c.interior_gradient(_u_var, qp);
+            Gradient du = c.interior_gradient(_u_var, qp);
 
             Real f = this->forcing(qpoint[qp]);
 
             for(uint i = 0; i < n_dofs; i++)
             {
-                Fe(i) += JxW[qp] * f * v[i][qp];
+                Fe(i) += JxW[qp] * (du*dv[i][qp] - f*v[i][qp]);
 
                 // if(request_jacobian && c.elem_solution_derivative)
                 if(request_jacobian)
@@ -101,58 +104,55 @@ public:
             }
         }
 
-        //out << Ke << std::endl;
-
         return request_jacobian;
     }
 
-    virtual bool side_time_derivative (bool request_jacobian, DiffContext& context)
-    {
-        return request_jacobian;
-    }
+//    virtual bool side_time_derivative (bool request_jacobian, DiffContext& /*context*/)
+//    {
+//        return request_jacobian;
+//    }
 
-    virtual bool mass_residual (bool request_jacobian, DiffContext& context)
-    {
-        FEMContext& c = cast_ref<FEMContext&>(context);
+//    virtual bool mass_residual (bool request_jacobian, DiffContext& context)
+//    {
+//        FEMContext& c = cast_ref<FEMContext&>(context);
 
-        FEBase* u_elem_fe;
+//        FEBase* u_elem_fe;
 
-        c.get_element_fe(_u_var, u_elem_fe);
+//        c.get_element_fe(_u_var, u_elem_fe);
 
-        std::vector<Real> const& JxW = u_elem_fe->get_JxW();
-        std::vector<std::vector<Real>> const& v = u_elem_fe->get_phi();
-        uint const n_dofs = c.get_dof_indices(_u_var).size();
+//        std::vector<Real> const& JxW = u_elem_fe->get_JxW();
+//        std::vector<std::vector<Real>> const& v = u_elem_fe->get_phi();
+//        uint const n_dofs = c.get_dof_indices(_u_var).size();
 
-        DenseSubMatrix<Number>& Ke = c.get_elem_jacobian(_u_var, _u_var);
-        DenseSubVector<Number>& Fe = c.get_elem_residual(_u_var);
+//        DenseSubMatrix<Number>& Ke = c.get_elem_jacobian(_u_var, _u_var);
+//        DenseSubVector<Number>& Fe = c.get_elem_residual(_u_var);
 
-        uint n_qp = c.get_element_qrule().n_points();
+//        uint n_qp = c.get_element_qrule().n_points();
 
-        for(uint qp = 0; qp < n_qp; qp++)
-        {
-            Real u_old = c.interior_value( _u_var, qp );
+//        for(uint qp = 0; qp < n_qp; qp++)
+//        {
+//            Real u_old = c.interior_value( _u_var, qp );
 
-            for(uint i = 0; i < n_dofs; i++)
-            {
-                Fe(i) += JxW[qp] * u_old * v[i][qp];
+//            for(uint i = 0; i < n_dofs; i++)
+//            {
+//                Fe(i) += JxW[qp] * u_old * v[i][qp];
 
-//                if(request_jacobian && c.elem_solution_derivative)
-                if(request_jacobian)
-                {
-                    for(uint j = 0; j < n_dofs; j++)
-                    {
-                        Ke(i,j) += JxW[qp] * v[j][qp] * v[i][qp];
-                    }
-                }
-            }
-        }
-        return request_jacobian;
-    }
+////                if(request_jacobian && c.elem_solution_derivative)
+//                if(request_jacobian)
+//                {
+//                    for(uint j = 0; j < n_dofs; j++)
+//                    {
+//                        Ke(i,j) += JxW[qp] * v[j][qp] * v[i][qp];
+//                    }
+//                }
+//            }
+//        }
+//        return request_jacobian;
+//    }
 
     Real forcing(Point const& p)
     {
-        return 2.0;
-        // return std::sin(p(0));
+        return 0.25*M_PI*M_PI*std::sin(0.5*M_PI*p(0));
     }
 
 //    virtual void postprocess()
@@ -169,7 +169,7 @@ int main(int argc, char* argv[])
 
     Mesh mesh(init.comm());
 
-    MeshTools::Generation::build_line(mesh, 2, 0., 1., EDGE2);
+    MeshTools::Generation::build_line(mesh, 20, 0., 1., EDGE2);
     //MeshTools::Generation::build_square(mesh, 4, 10, 0., 1., 0., 1., QUAD4);
 
     mesh.print_info();
@@ -188,20 +188,13 @@ int main(int argc, char* argv[])
 
     DiffSolver& solver = *(system.time_solver->diff_solver().get());
     solver.quiet = false;
-    solver.verbose = true;
-    solver.relative_step_tolerance = 1.e-10;
-    // solver->max_nonlinear_iterations = 15;
-    // solver->relative_step_tolerance = 1.e-3;
-    // solver->relative_residual_tolerance = 0.0;
-    // solver->absolute_residual_tolerance = 0.0;
-
-    // solver->max_linear_iterations = 50000;
-    // solver->initial_linear_tolerance = 1.e-3;
-//    solver->max_nonlinear_iterations = 15;
-//    solver->relative_step_tolerance = 1.e-3;
-//    solver->absolute_residual_tolerance = 1e-12;
-//    solver->absolute_step_tolerance = 1.e-12;
-//    solver->continue_after_backtrack_failure = true;
+    solver.verbose = !solver.quiet;
+    solver.max_nonlinear_iterations = 15;
+    solver.relative_step_tolerance = 1.e-3;
+    solver.relative_residual_tolerance = 0.0;
+    solver.absolute_residual_tolerance = 0.0;
+    solver.max_linear_iterations = 50000;
+    solver.initial_linear_tolerance = 1.e-3;
 
     es.print_info();
 
@@ -210,8 +203,6 @@ int main(int argc, char* argv[])
     system.matrix->print();
     system.rhs->print();
     system.solution->print();
-
-    es.write("es.dat", EquationSystems::WRITE_DATA | EquationSystems::WRITE_ADDITIONAL_DATA);
 
     {
         std::ostringstream file_name;
@@ -225,7 +216,7 @@ int main(int argc, char* argv[])
 
         ExodusII_IO(mesh).write_timestep(file_name.str(), es, 1, 0.0/*system.time*/);
     }
-    //
+
     // const uint n_timesteps = 1;
     //
     // for (uint t_step=0; t_step != n_timesteps; ++t_step)
