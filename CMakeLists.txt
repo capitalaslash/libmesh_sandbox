@@ -30,3 +30,4 @@ add_subdirectory(self_lumping1d)
 
 add_subdirectory(stokes2d)
 
+add_subdirectory(neumann2d)
