@@ -35,3 +35,5 @@ add_subdirectory(stokes3d)
 
 add_subdirectory(neumann2d)
 
+add_subdirectory(gmsh)
+
