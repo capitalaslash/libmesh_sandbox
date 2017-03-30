@@ -22,6 +22,8 @@ add_subdirectory(advection1d)
 
 add_subdirectory(test2d)
 
+add_subdirectory(dirichlet)
+
 add_subdirectory(hermite1d)
 
 add_subdirectory(elem_add)
