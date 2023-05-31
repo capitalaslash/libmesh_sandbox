@@ -51,7 +51,13 @@ macro(libmesh_sandbox_add_exe folder_name target_name)
       PkgConfig::libmesh
       fmt::fmt
   )
+  add_test(
+    NAME ${folder_name}_${target_name}
+    COMMAND ${folder_name}_${target_name}
+  )
 endmacro()
+
+include(CTest)
 
 add_subdirectory(test1d)
 
