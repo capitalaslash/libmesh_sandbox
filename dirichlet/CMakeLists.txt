@@ -1,2 +1,1 @@
-add_executable(dirichlet main.cxx)
-
+libmesh_sandbox_add_exe(dirichlet main)

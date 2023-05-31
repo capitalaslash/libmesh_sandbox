@@ -1,1 +1,1 @@
-add_executable(sl1d main.cpp)
+libmesh_sandbox_add_exe(self_lumping1d main)

@@ -1,1 +1,1 @@
-add_executable(elem_add main.cpp)
+libmesh_sandbox_add_exe(elem_add main)

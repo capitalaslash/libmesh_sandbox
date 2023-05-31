@@ -1,3 +1,2 @@
-add_executable(advection1d main_trad.cpp)
-
-add_executable(supg supg.cpp)
+libmesh_sandbox_add_exe(advection1d main_trad)
+libmesh_sandbox_add_exe(advection1d supg)

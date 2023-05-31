@@ -1,1 +1,1 @@
-add_executable(stokes2d main.cpp)
+libmesh_sandbox_add_exe(stokes2d main)

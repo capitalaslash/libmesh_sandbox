@@ -1,20 +1,57 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
-project(libmeshSandbox CXX C)
+project(libmeshSandbox
+  VERSION 0.1
+  LANGUAGES CXX
+)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wpedantic")
 
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -Wall -Wpedantic")
+include(FetchContent)
+FetchContent_Declare(fmt
+  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+  GIT_TAG master
+)
+FetchContent_MakeAvailable(fmt)
 
 find_package(MPI REQUIRED)
-set(CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER})
 
-find_package(LIBMESH REQUIRED)
-add_definitions(${LIBMESH_DEFINITIONS})
-include_directories(${LIBMESH_INCLUDE_DIRS})
-set(LIBS ${LIBS} ${LIBMESH_LIBRARIES})
-link_libraries(${LIBS})
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(libmesh REQUIRED IMPORTED_TARGET libmesh)
+
+# workaround for bogus libmesh include path
+get_target_property(
+  LIBMESH_INCLUDE_DIRECTORIES PkgConfig::libmesh INTERFACE_INCLUDE_DIRECTORIES)
+list(REMOVE_ITEM LIBMESH_INCLUDE_DIRECTORIES "/usr/include/tirpc")
+set_property(TARGET PkgConfig::libmesh
+  PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${LIBMESH_INCLUDE_DIRECTORIES})
+
+include(FeatureSummary)
+feature_summary(WHAT ALL)
+
+set(SRC_FILES "")
+
+macro(libmesh_sandbox_add_exe folder_name target_name)
+  # set_options(EXCLUDE_FROM_ALL)
+  # set(one_value_args SOURCES HEADERS)
+  # set(multi_value_args EMPTY)
+  message(STATUS "adding exe ${target_name} in ${folder_name}")
+  add_executable(${folder_name}_${target_name})
+  target_sources(${folder_name}_${target_name}
+    PRIVATE ${target_name}.cpp
+  )
+  list(APPEND SRC_FILES "${folder_name}/${target_name}.cpp")
+  set(SRC_FILES "${SRC_FILES}" PARENT_SCOPE)
+  target_link_libraries(${folder_name}_${target_name}
+    PUBLIC
+      MPI::MPI_CXX
+      PkgConfig::libmesh
+      fmt::fmt
+  )
+endmacro()
 
 add_subdirectory(test1d)
 
@@ -36,4 +73,20 @@ add_subdirectory(stokes3d)
 add_subdirectory(neumann2d)
 
 add_subdirectory(gmsh)
+
+message(STATUS "SRC_FILES = ${SRC_FILES}")
+
+find_program(CLANGFORMAT clang-format)
+if (CLANGFORMAT)
+  add_custom_target(format
+    COMMAND ${CLANGFORMAT}
+    -i
+    ${SRC_FILES} ${HEADER_FILES}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
+else()
+  add_custom_target(format
+    COMMAND echo "clang-format could not be found"
+  )
+endif()
 

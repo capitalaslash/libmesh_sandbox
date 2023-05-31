@@ -1,2 +1,2 @@
-add_executable(stokes3d main.cpp)
-add_executable(stokes3d_libmesh main_libmesh.cxx)
+libmesh_sandbox_add_exe(stokes3d main)
+libmesh_sandbox_add_exe(stokes3d main_libmesh)

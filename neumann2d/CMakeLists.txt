@@ -1,1 +1,1 @@
-add_executable(neumann2d main.cpp)
+libmesh_sandbox_add_exe(neumann2d main)
