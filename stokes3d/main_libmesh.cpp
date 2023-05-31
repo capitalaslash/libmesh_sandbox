@@ -141,7 +141,7 @@ int main (int argc, char** argv)
   equation_systems.parameters.set<Real> ("dt")   = dt;
   equation_systems.parameters.set<Real> ("nu") = .007;
 
-  UniquePtr<NumericVector<Number> >
+  std::unique_ptr<NumericVector<Number> >
     last_nonlinear_soln (navier_stokes_system.solution->clone());
 
   ExodusII_IO exo_io(mesh);
@@ -257,8 +257,8 @@ void assemble_stokes (EquationSystems & es,
   FEType fe_vel_type = navier_stokes_system.variable_type(u_var);
   FEType fe_pres_type = navier_stokes_system.variable_type(p_var);
 
-  UniquePtr<FEBase> fe_vel  (FEBase::build(dim, fe_vel_type));
-  UniquePtr<FEBase> fe_pres (FEBase::build(dim, fe_pres_type));
+  std::unique_ptr<FEBase> fe_vel  (FEBase::build(dim, fe_vel_type));
+  std::unique_ptr<FEBase> fe_pres (FEBase::build(dim, fe_pres_type));
 
   QGauss qrule (dim, fe_vel_type.default_quadrature_order());
   fe_vel->attach_quadrature_rule (&qrule);

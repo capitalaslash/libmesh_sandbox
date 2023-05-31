@@ -180,9 +180,9 @@ int main(int argc, char* argv[])
 
     Diff& system = es.add_system<Diff>("Diff");
 
-//     system.time_solver = UniquePtr<TimeSolver>(new EulerSolver(system));
+//     system.time_solver = std::unique_ptr<TimeSolver>(new EulerSolver(system));
 //     system.deltat= 1.0;
-    system.time_solver = UniquePtr<TimeSolver>(new SteadySolver(system));
+    system.time_solver = std::unique_ptr<TimeSolver>(new SteadySolver(system));
 
     es.init();
 
