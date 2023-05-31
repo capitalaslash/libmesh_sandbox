@@ -50,9 +50,9 @@ void assemble_poisson(EquationSystems & es, const std::string & system_name)
   std::vector<std::vector<RealGradient>> const & dv = fe->get_dphi();
   std::vector<Point> const & qpoint = fe->get_xyz();
 
-  const std::vector<std::vector<Real>> & v_side = fe_side->get_phi();
-  const std::vector<Real> & JxW_side = fe_side->get_JxW();
-  const std::vector<Point> & qside_point = fe_side->get_xyz();
+  // const std::vector<std::vector<Real>> & v_side = fe_side->get_phi();
+  // const std::vector<Real> & JxW_side = fe_side->get_JxW();
+  // const std::vector<Point> & qside_point = fe_side->get_xyz();
 
   DenseMatrix<Number> Ke;
   DenseVector<Number> Fe;
