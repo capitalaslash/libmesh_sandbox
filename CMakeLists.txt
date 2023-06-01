@@ -71,6 +71,7 @@ add_subdirectory(hermite1d)
 
 add_subdirectory(elem_add)
 
+add_subdirectory(ns)
 add_subdirectory(self_lumping1d)
 
 add_subdirectory(stokes2d)
