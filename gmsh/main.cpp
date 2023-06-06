@@ -309,7 +309,7 @@ int main(int argc, char * argv[])
   es.print_info();
 
   Real const dt = 0.5;
-  const unsigned int n_timesteps = 20;
+  const unsigned int n_timesteps = 10;
 
   //  const unsigned int n_nonlinear_steps = 15;
   //  const Real nonlinear_tolerance       = 1.e-5;
