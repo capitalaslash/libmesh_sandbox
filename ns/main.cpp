@@ -35,6 +35,7 @@
 using namespace libMesh;
 
 void assemble_ns(EquationSystems & es, std::string const & system_name);
+void assemble_t(EquationSystems & es, std::string const & system_name);
 
 void set_lid_driven_bcs(TransientLinearImplicitSystem & system);
 void set_stagnation_bcs(TransientLinearImplicitSystem & system);
@@ -71,6 +72,20 @@ int main(int argc, char ** argv)
   // set_stagnation_bcs(system);
   set_poiseuille_bcs(system_ns);
 
+  auto & system_t =
+      equation_systems.add_system<TransientLinearImplicitSystem>("Temperature");
+  system_t.add_variable("T", FIRST);
+  system_t.attach_assemble_function(assemble_t);
+
+  DofMap & dof_map_t = system_t.get_dof_map();
+
+  // T=0 on bottom, left, right
+  dof_map_t.add_dirichlet_boundary(
+      DirichletBoundary({0, 1, 3}, {0}, ZeroFunction<Number>()));
+  // T=1 on top
+  dof_map_t.add_dirichlet_boundary(
+      DirichletBoundary({2}, {0}, ConstFunction<Number>(1.)));
+
   equation_systems.init();
   equation_systems.print_info();
 
@@ -79,6 +94,7 @@ int main(int argc, char ** argv)
   Real const dt = 0.1;
   Real const t_init = 0.0;
   system_ns.time = t_init;
+  system_t.time = t_init;
   uint const n_timesteps = 15;
 
   uint const n_nonlinear_steps = 15;
@@ -104,10 +120,12 @@ int main(int argc, char ** argv)
   for (uint t_step = 1; t_step <= n_timesteps; ++t_step)
   {
     system_ns.time += dt;
+    system_t.time += dt;
 
     fmt::print(out, "\n{}time step: {}, time: {}\n", sep, t_step, system_ns.time);
 
     *system_ns.old_local_solution = *system_ns.current_local_solution;
+    *system_t.old_local_solution = *system_t.current_local_solution;
 
     equation_systems.parameters.set<Real>("linear solver tolerance") =
         initial_linear_solver_tol;
@@ -157,6 +175,11 @@ int main(int argc, char ** argv)
     } // end nonlinear loop
 
     libmesh_error_msg_if(!converged, "Error: Newton iterations failed to converge!");
+
+    system_t.solve();
+    fmt::print(
+        out, "T linear solver converged at step: {}\n", system_t.n_linear_iterations());
+    fmt::print(out, "T final residual: {:e}\n", system_t.final_linear_residual());
 
     // write out every nth timestep to file.
     if ((t_step + 1) % write_interval == 0)
@@ -425,4 +448,107 @@ void set_poiseuille_bcs(TransientLinearImplicitSystem & system_ns)
   // v=0 on left
   dof_map.add_dirichlet_boundary(
       DirichletBoundary({3}, {v_var}, ZeroFunction<Number>()));
+}
+
+void assemble_t(EquationSystems & es, std::string const & system_name)
+{
+  libmesh_assert_equal_to(system_name, "Temperature");
+
+  MeshBase const & mesh = es.get_mesh();
+  uint const dim = mesh.mesh_dimension();
+
+  auto & system_t = es.get_system<TransientLinearImplicitSystem>("Temperature");
+  uint const t_var = system_t.variable_number("T");
+
+  auto & system_ns = es.get_system<TransientLinearImplicitSystem>("Navier-Stokes");
+  uint const u_var = system_ns.variable_number("vel_x");
+  uint const v_var = system_ns.variable_number("vel_y");
+
+  FEType fe_t_type = system_t.variable_type(t_var);
+  std::unique_ptr<FEBase> fe_t(FEBase::build(dim, fe_t_type));
+
+  FEType fe_vel_type = system_ns.variable_type(u_var);
+  std::unique_ptr<FEBase> fe_vel(FEBase::build(dim, fe_vel_type));
+
+  QGauss qrule(dim, fe_vel_type.default_quadrature_order());
+  fe_t->attach_quadrature_rule(&qrule);
+  fe_vel->attach_quadrature_rule(&qrule);
+
+  std::vector<Real> const & JxW = fe_t->get_JxW();
+  std::vector<std::vector<Real>> const & q = fe_t->get_phi();
+  std::vector<std::vector<RealGradient>> const & dq = fe_t->get_dphi();
+  std::vector<std::vector<Real>> const & v = fe_vel->get_phi();
+
+  DofMap const & dof_map_t = system_t.get_dof_map();
+  DofMap const & dof_map_ns = system_ns.get_dof_map();
+
+  DenseMatrix<Number> Ke;
+  DenseVector<Number> Fe;
+
+  std::vector<dof_id_type> dof_indices_t;
+  std::vector<dof_id_type> dof_indices_u;
+  std::vector<dof_id_type> dof_indices_v;
+
+  Real const dt = es.parameters.get<Real>("dt");
+  // Real const theta = 1.;
+  Real const kappa = 0.1; // es.parameters.get<Real>("kappa");
+
+  for (const auto & elem: mesh.active_local_element_ptr_range())
+  {
+    dof_map_t.dof_indices(elem, dof_indices_t);
+    uint const n_dofs_t = dof_indices_t.size();
+
+    dof_map_ns.dof_indices(elem, dof_indices_u, u_var);
+    dof_map_ns.dof_indices(elem, dof_indices_v, v_var);
+    uint const n_dofs_vel = dof_indices_u.size();
+
+    fe_t->reinit(elem);
+    fe_vel->reinit(elem);
+
+    Ke.resize(n_dofs_t, n_dofs_t);
+    Fe.resize(n_dofs_t);
+
+    for (uint qp = 0; qp < qrule.n_points(); qp++)
+    {
+      Number t_old = 0.;
+      for (uint l = 0; l < n_dofs_t; l++)
+      {
+        t_old += q[l][qp] * system_t.old_solution(dof_indices_t[l]);
+      }
+
+      NumberVectorValue u_old;
+      for (uint l = 0; l < n_dofs_vel; l++)
+      {
+        u_old(0) += v[l][qp] * system_ns.old_solution(dof_indices_u[l]);
+        u_old(1) += v[l][qp] * system_ns.old_solution(dof_indices_v[l]);
+      }
+
+      for (uint i = 0; i < n_dofs_t; i++)
+      {
+        Fe(i) += JxW[qp] *
+                 (t_old * q[i][qp] // mass-matrix term
+                                   // - (1. - theta) * dt * (u_old * grad_u_old[k]) *
+                  //     v[i][qp] +                             // convection term
+                  // (1. - theta) * dt * p_old * dv[i][qp](k) - // pressure term on rhs
+                  // (1. - theta) * dt * nu *
+                  //     (grad_u_old[k] * dv[i][qp]) +         // diffusion term on rhs
+                  // theta * dt * (u * grad_u[k]) * v[i][qp] // Newton term
+                 );
+
+        for (uint j = 0; j < n_dofs_t; j++)
+        {
+          Ke(i, j) +=
+              JxW[qp] *
+              (q[i][qp] * q[j][qp]                               // mass matrix term
+               + dt * kappa * (dq[i][qp] * dq[j][qp])            // diffusion term
+               + /*theta **/ dt * (u_old * dq[j][qp]) * q[i][qp] // convection term
+              );
+        } // j loop
+      }   // i loop
+    }     // end of the quadrature point qp-loop
+    dof_map_t.heterogenously_constrain_element_matrix_and_vector(Ke, Fe, dof_indices_t);
+
+    system_t.get_system_matrix().add_matrix(Ke, dof_indices_t);
+    system_t.rhs->add_vector(Fe, dof_indices_t);
+  } // end of element loop
 }
