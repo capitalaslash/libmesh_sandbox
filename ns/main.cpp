@@ -1,3 +1,4 @@
+#include <libmesh/analytic_function.h>
 #include <libmesh/boundary_info.h>
 #include <libmesh/const_function.h>
 #include <libmesh/dense_matrix.h>
@@ -17,7 +18,6 @@
 #include <libmesh/mesh.h>
 #include <libmesh/mesh_generation.h>
 #include <libmesh/numeric_vector.h>
-#include <libmesh/parsed_function.h>
 #include <libmesh/perf_log.h>
 #include <libmesh/quadrature_gauss.h>
 #include <libmesh/sparse_matrix.h>
@@ -58,28 +58,27 @@ int main(int argc, char ** argv)
   mesh.print_info();
 
   EquationSystems equation_systems(mesh);
-  TransientLinearImplicitSystem & system =
+
+  auto & system_ns =
       equation_systems.add_system<TransientLinearImplicitSystem>("Navier-Stokes");
-  system.add_variable("vel_x", SECOND);
-  system.add_variable("vel_y", SECOND);
-  system.add_variable("p", FIRST);
-  system.attach_assemble_function(assemble_ns);
+  system_ns.add_variable("vel_x", SECOND);
+  system_ns.add_variable("vel_y", SECOND);
+  system_ns.add_variable("p", FIRST);
+  system_ns.attach_assemble_function(assemble_ns);
 
   // Note: only pick one set of BCs!
   // set_lid_driven_bcs(system);
-  set_stagnation_bcs(system);
-  // set_poiseuille_bcs(system);
+  // set_stagnation_bcs(system);
+  set_poiseuille_bcs(system_ns);
 
   equation_systems.init();
   equation_systems.print_info();
 
-  PerfLog perf_log("Navier-Stokes");
-
-  TransientLinearImplicitSystem & ns_system =
-      equation_systems.get_system<TransientLinearImplicitSystem>("Navier-Stokes");
+  PerfLog perf_log_ns("Navier-Stokes");
 
   Real const dt = 0.1;
-  ns_system.time = 0.0;
+  Real const t_init = 0.0;
+  system_ns.time = t_init;
   uint const n_timesteps = 15;
 
   uint const n_nonlinear_steps = 15;
@@ -97,18 +96,18 @@ int main(int argc, char ** argv)
   equation_systems.parameters.set<Real>("nu") = .01;
 
   std::unique_ptr<NumericVector<Number>> last_nonlinear_soln(
-      ns_system.solution->clone());
+      system_ns.solution->clone());
 
   // Since we are not doing adaptivity, write all solutions to a single Exodus file.
   ExodusII_IO exo_io(mesh);
 
   for (uint t_step = 1; t_step <= n_timesteps; ++t_step)
   {
-    ns_system.time += dt;
+    system_ns.time += dt;
 
-    fmt::print(out, "\n{}time step: {}, time: {}\n", sep, t_step, ns_system.time);
+    fmt::print(out, "\n{}time step: {}, time: {}\n", sep, t_step, system_ns.time);
 
-    *ns_system.old_local_solution = *ns_system.current_local_solution;
+    *system_ns.old_local_solution = *system_ns.current_local_solution;
 
     equation_systems.parameters.set<Real>("linear solver tolerance") =
         initial_linear_solver_tol;
@@ -117,20 +116,20 @@ int main(int argc, char ** argv)
     for (uint l = 0; l < n_nonlinear_steps; ++l)
     {
       last_nonlinear_soln->zero();
-      last_nonlinear_soln->add(*ns_system.solution);
+      last_nonlinear_soln->add(*system_ns.solution);
 
-      perf_log.push("linear solve");
-      equation_systems.get_system("Navier-Stokes").solve();
-      perf_log.pop("linear solve");
+      perf_log_ns.push("linear solve");
+      system_ns.solve();
+      perf_log_ns.pop("linear solve");
 
-      last_nonlinear_soln->add(-1., *ns_system.solution);
+      last_nonlinear_soln->add(-1., *system_ns.solution);
       last_nonlinear_soln->close();
       const Real norm_delta = last_nonlinear_soln->l2_norm();
-      const uint n_linear_iterations = ns_system.n_linear_iterations();
-      const Real final_linear_residual = ns_system.final_linear_residual();
+      const uint n_linear_iterations = system_ns.n_linear_iterations();
+      const Real final_linear_residual = system_ns.final_linear_residual();
 
       if (n_linear_iterations == 0 &&
-          (ns_system.final_linear_residual() >= nonlinear_tolerance || l == 0))
+          (system_ns.final_linear_residual() >= nonlinear_tolerance || l == 0))
       {
         Real old_linear_solver_tolerance =
             equation_systems.parameters.get<Real>("linear solver tolerance");
@@ -139,12 +138,12 @@ int main(int argc, char ** argv)
         continue;
       }
 
-      fmt::print(out, "linear solver converged at step: {}\n", n_linear_iterations);
-      fmt::print(out, "final residual: {}\n", final_linear_residual);
-      fmt::print(out, "nonlinear convergence: ||u - u_old||: {}\n", norm_delta);
+      fmt::print(out, "ns linear solver converged at step: {}\n", n_linear_iterations);
+      fmt::print(out, "ns final residual: {:e}\n", final_linear_residual);
+      fmt::print(out, "ns nonlinear convergence: ||u - u_old||: {:e}\n", norm_delta);
 
       if ((norm_delta < nonlinear_tolerance) &&
-          (ns_system.final_linear_residual() < nonlinear_tolerance))
+          (system_ns.final_linear_residual() < nonlinear_tolerance))
       {
         fmt::print(out, "nonlinear solver converged at step {}\n", l);
         converged = true;
@@ -162,7 +161,7 @@ int main(int argc, char ** argv)
     // write out every nth timestep to file.
     if ((t_step + 1) % write_interval == 0)
     {
-      exo_io.write_timestep("out.e", equation_systems, t_step + 1, ns_system.time);
+      exo_io.write_timestep("out.e", equation_systems, t_step + 1, system_ns.time);
     }
   } // end timestep loop.
 
@@ -176,15 +175,15 @@ void assemble_ns(EquationSystems & es, const std::string & libmesh_dbg_var(syste
   MeshBase const & mesh = es.get_mesh();
   uint const dim = mesh.mesh_dimension();
 
-  TransientLinearImplicitSystem & ns_system =
-      es.get_system<TransientLinearImplicitSystem>("Navier-Stokes");
-  uint const u_var = ns_system.variable_number("vel_x");
-  uint const v_var = ns_system.variable_number("vel_y");
-  uint const p_var = ns_system.variable_number("p");
+  auto & system_ns = es.get_system<TransientLinearImplicitSystem>("Navier-Stokes");
+  uint const u_var = system_ns.variable_number("vel_x");
+  uint const v_var = system_ns.variable_number("vel_y");
+  uint const p_var = system_ns.variable_number("p");
 
-  FEType fe_vel_type = ns_system.variable_type(u_var);
-  FEType fe_pres_type = ns_system.variable_type(p_var);
+  FEType fe_vel_type = system_ns.variable_type(u_var);
   std::unique_ptr<FEBase> fe_vel(FEBase::build(dim, fe_vel_type));
+
+  FEType fe_pres_type = system_ns.variable_type(p_var);
   std::unique_ptr<FEBase> fe_pres(FEBase::build(dim, fe_pres_type));
 
   QGauss qrule(dim, fe_vel_type.default_quadrature_order());
@@ -196,7 +195,7 @@ void assemble_ns(EquationSystems & es, const std::string & libmesh_dbg_var(syste
   std::vector<std::vector<RealGradient>> const & dv = fe_vel->get_dphi();
   std::vector<std::vector<Real>> const & q = fe_pres->get_phi();
 
-  DofMap const & dof_map = ns_system.get_dof_map();
+  DofMap const & dof_map = system_ns.get_dof_map();
 
   DenseMatrix<Number> Ke;
   DenseVector<Number> Fe;
@@ -220,7 +219,6 @@ void assemble_ns(EquationSystems & es, const std::string & libmesh_dbg_var(syste
   Real const nu = es.parameters.get<Real>("nu");
   bool const pin_pressure = es.parameters.get<bool>("pin_pressure");
 
-  SparseMatrix<Number> & matrix = ns_system.get_system_matrix();
   for (const auto & elem: mesh.active_local_element_ptr_range())
   {
     dof_map.dof_indices(elem, dof_indices);
@@ -260,20 +258,20 @@ void assemble_ns(EquationSystems & es, const std::string & libmesh_dbg_var(syste
       std::array<Gradient, 2> grad_u_old{};
       for (uint l = 0; l < n_u_dofs; l++)
       {
-        u_old(0) += v[l][qp] * ns_system.old_solution(dof_indices_u[l]);
-        u_old(1) += v[l][qp] * ns_system.old_solution(dof_indices_v[l]);
-        grad_u_old[0].add_scaled(dv[l][qp], ns_system.old_solution(dof_indices_u[l]));
-        grad_u_old[1].add_scaled(dv[l][qp], ns_system.old_solution(dof_indices_v[l]));
+        u_old(0) += v[l][qp] * system_ns.old_solution(dof_indices_u[l]);
+        u_old(1) += v[l][qp] * system_ns.old_solution(dof_indices_v[l]);
+        grad_u_old[0].add_scaled(dv[l][qp], system_ns.old_solution(dof_indices_u[l]));
+        grad_u_old[1].add_scaled(dv[l][qp], system_ns.old_solution(dof_indices_v[l]));
 
-        u(0) += v[l][qp] * ns_system.current_solution(dof_indices_u[l]);
-        u(1) += v[l][qp] * ns_system.current_solution(dof_indices_v[l]);
-        grad_u[0].add_scaled(dv[l][qp], ns_system.current_solution(dof_indices_u[l]));
-        grad_u[1].add_scaled(dv[l][qp], ns_system.current_solution(dof_indices_v[l]));
+        u(0) += v[l][qp] * system_ns.current_solution(dof_indices_u[l]);
+        u(1) += v[l][qp] * system_ns.current_solution(dof_indices_v[l]);
+        grad_u[0].add_scaled(dv[l][qp], system_ns.current_solution(dof_indices_u[l]));
+        grad_u[1].add_scaled(dv[l][qp], system_ns.current_solution(dof_indices_v[l]));
       }
 
       for (uint l = 0; l < n_p_dofs; l++)
       {
-        p_old += q[l][qp] * ns_system.old_solution(dof_indices_p[l]);
+        p_old += q[l][qp] * system_ns.old_solution(dof_indices_p[l]);
       }
 
       for (uint i = 0; i < n_u_dofs; i++)
@@ -329,19 +327,19 @@ void assemble_ns(EquationSystems & es, const std::string & libmesh_dbg_var(syste
 
     dof_map.heterogenously_constrain_element_matrix_and_vector(Ke, Fe, dof_indices);
 
-    matrix.add_matrix(Ke, dof_indices);
-    ns_system.rhs->add_vector(Fe, dof_indices);
+    system_ns.get_system_matrix().add_matrix(Ke, dof_indices);
+    system_ns.rhs->add_vector(Fe, dof_indices);
   } // end of element loop
 }
 
-void set_lid_driven_bcs(TransientLinearImplicitSystem & system)
+void set_lid_driven_bcs(TransientLinearImplicitSystem & system_ns)
 {
-  system.get_equation_systems().parameters.set<bool>("pin_pressure") = true;
+  system_ns.get_equation_systems().parameters.set<bool>("pin_pressure") = true;
 
-  uint const u_var = system.variable_number("vel_x");
-  uint const v_var = system.variable_number("vel_y");
+  uint const u_var = system_ns.variable_number("vel_x");
+  uint const v_var = system_ns.variable_number("vel_y");
 
-  DofMap & dof_map = system.get_dof_map();
+  DofMap & dof_map = system_ns.get_dof_map();
 
   // u=v=0 on bottom, left, right
   dof_map.add_dirichlet_boundary(
@@ -354,14 +352,24 @@ void set_lid_driven_bcs(TransientLinearImplicitSystem & system)
       DirichletBoundary({2}, {v_var}, ZeroFunction<Number>()));
 }
 
-void set_stagnation_bcs(TransientLinearImplicitSystem & system)
+void top_x(DenseVector<Number> & output, Point const & p, Real const /*t*/)
 {
-  system.get_equation_systems().parameters.set<bool>("pin_pressure") = false;
+  output(0) = p(0);
+};
 
-  uint const u_var = system.variable_number("vel_x");
-  uint const v_var = system.variable_number("vel_y");
+void top_y(DenseVector<Number> & output, Point const & p, Real const /*t*/)
+{
+  output(0) = -p(1);
+};
 
-  DofMap & dof_map = system.get_dof_map();
+void set_stagnation_bcs(TransientLinearImplicitSystem & system_ns)
+{
+  system_ns.get_equation_systems().parameters.set<bool>("pin_pressure") = false;
+
+  uint const u_var = system_ns.variable_number("vel_x");
+  uint const v_var = system_ns.variable_number("vel_y");
+
+  DofMap & dof_map = system_ns.get_dof_map();
 
   // u=v=0 on bottom (boundary 0)
   dof_map.add_dirichlet_boundary(
@@ -371,38 +379,49 @@ void set_stagnation_bcs(TransientLinearImplicitSystem & system)
       DirichletBoundary({3}, {u_var}, ZeroFunction<Number>()));
   {
     // u = k*x on top (boundary 2)
-    std::vector<std::string> additional_vars{"k"};
-    std::vector<Number> initial_vals{1.};
+    // auto const additional_vars = std::vector<std::string>({"k"});
+    // auto const initial_vals = std::vector<Number>{1.};
     dof_map.add_dirichlet_boundary(DirichletBoundary(
-        {2}, {u_var}, ParsedFunction<Number>("k*x", &additional_vars, &initial_vals)));
+        {2},
+        {u_var},
+        // ParsedFunction<Number>("k*x", &additional_vars, &initial_vals)
+        AnalyticFunction<Number>(top_x)));
   }
   {
     // v = -k*y on top (boundary 2)
-    std::vector<std::string> additional_vars{"k"};
-    std::vector<Number> initial_vals{1.};
+    // std::vector<std::string> additional_vars{"k"};
+    // std::vector<Number> initial_vals{1.};
     dof_map.add_dirichlet_boundary(DirichletBoundary(
         {2},
         {v_var},
-        ParsedFunction<Number>("-k*y", &additional_vars, &initial_vals),
+        // ParsedFunction<Number>("-k*y", &additional_vars, &initial_vals),
+        AnalyticFunction<Number>(top_y),
         LOCAL_VARIABLE_ORDER));
   }
 }
 
-void set_poiseuille_bcs(TransientLinearImplicitSystem & system)
+void inlet(DenseVector<Number> & output, Point const & p, Real const /*t*/)
 {
-  system.get_equation_systems().parameters.set<bool>("pin_pressure") = false;
+  output(0) = 4.0 * p(1) * (1.0 - p(1));
+};
 
-  uint const u_var = system.variable_number("vel_x");
-  uint const v_var = system.variable_number("vel_y");
+void set_poiseuille_bcs(TransientLinearImplicitSystem & system_ns)
+{
+  system_ns.get_equation_systems().parameters.set<bool>("pin_pressure") = false;
 
-  DofMap & dof_map = system.get_dof_map();
+  uint const u_var = system_ns.variable_number("vel_x");
+  uint const v_var = system_ns.variable_number("vel_y");
+
+  DofMap & dof_map = system_ns.get_dof_map();
 
   // u=v=0 on top, bottom
   dof_map.add_dirichlet_boundary(
       DirichletBoundary({0, 2}, {u_var, v_var}, ZeroFunction<Number>()));
   // u=quadratic on left
+  // dof_map.add_dirichlet_boundary(
+  //     DirichletBoundary({3}, {u_var}, ParsedFunction<Number>("4*y*(1-y)")));
   dof_map.add_dirichlet_boundary(
-      DirichletBoundary({3}, {u_var}, ParsedFunction<Number>("4*y*(1-y)")));
+      DirichletBoundary({3}, {u_var}, AnalyticFunction<Number>(inlet)));
   // v=0 on left
   dof_map.add_dirichlet_boundary(
       DirichletBoundary({3}, {v_var}, ZeroFunction<Number>()));
